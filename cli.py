@@ -72,8 +72,14 @@ def main(source, model, output_format, language, output):
         last_msg = ['']
         captured_meta = [{}]
 
-        def progress(msg: str):
-            click.echo(f"  [{msg}]" + ' ' * 20, nl=False)
+        def progress(msg: str, pct=None):
+            if pct is not None:
+                filled = pct // 5
+                bar = '█' * filled + '░' * (20 - filled)
+                line = f"  [{bar}] {pct:3d}%  {msg}"
+            else:
+                line = f"  {msg}"
+            click.echo(line + ' ' * 10, nl=False)
             click.echo('\r', nl=False)
             last_msg[0] = msg
 

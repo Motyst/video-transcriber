@@ -63,6 +63,9 @@ textarea {
   margin-right: 6px; vertical-align: middle;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+.progress-wrap { background: #0c0c1a; border-radius: 4px; height: 6px; overflow: hidden; margin-top: 0.75rem; }
+.progress-bar { height: 100%; background: #c084fc; border-radius: 4px; transition: width 0.3s ease; width: 0%; }
+.batch-downloads { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.6rem; }
 </style>
 </head>
 <body>
@@ -132,20 +135,25 @@ textarea {
 
   <div class="card status-card" id="status-card">
     <p class="status-text" id="status-text"><span class="spinner"></span>Starting...</p>
+    <div class="progress-wrap" id="progress-wrap" style="display:none">
+      <div class="progress-bar" id="progress-bar"></div>
+    </div>
   </div>
 
   <div class="card result-card" id="result-card">
     <textarea id="result-text" readonly></textarea>
     <div class="result-actions">
       <button class="btn-sm" onclick="copyResult()">Copy</button>
-      <button class="btn-sm" onclick="downloadResult()">Download</button>
+      <button class="btn-sm" onclick="downloadResult()">Download all</button>
     </div>
+    <div class="batch-downloads" id="batch-downloads"></div>
   </div>
 </div>
 
 <script>
 let currentTab = 'url';
 let currentFormat = 'txt';
+let currentTitle = 'transcription';
 
 function switchTab(tab) {
   currentTab = tab;
@@ -179,6 +187,7 @@ async function submit() {
 
   btn.disabled = true;
   setStatus('Submitting...');
+  updateProgress(null);
   showCard('status-card', true);
   showCard('result-card', false);
 
@@ -199,14 +208,17 @@ function listenStatus(jobId, btn) {
     const d = JSON.parse(e.data);
     if (d.status === 'done') {
       es.close();
+      updateProgress(100);
       setStatus('Done');
-      showResult(d.result);
+      showResult(d.result, d.title || '', d.results || null);
       btn.disabled = false;
     } else if (d.status === 'error') {
       es.close();
+      updateProgress(null);
       setStatus(d.error || 'Unknown error', true);
       btn.disabled = false;
     } else {
+      if (d.progress != null) updateProgress(d.progress);
       setStatus(d.status_text || d.status);
     }
   };
@@ -225,8 +237,28 @@ function showCard(id, visible) {
   el.classList.toggle('visible', visible);
 }
 
-function showResult(text) {
+function updateProgress(pct) {
+  const wrap = document.getElementById('progress-wrap');
+  const bar = document.getElementById('progress-bar');
+  if (pct == null) { wrap.style.display = 'none'; bar.style.width = '0%'; return; }
+  wrap.style.display = '';
+  bar.style.width = pct + '%';
+}
+
+function showResult(text, title, results) {
   document.getElementById('result-text').value = text;
+  currentTitle = title || 'transcription';
+  const batchDiv = document.getElementById('batch-downloads');
+  batchDiv.innerHTML = '';
+  if (results && results.length > 1) {
+    results.forEach(r => {
+      const btn = document.createElement('button');
+      btn.className = 'btn-sm';
+      btn.textContent = `↓ ${r.name}`;
+      btn.onclick = () => downloadText(r.text, r.name);
+      batchDiv.appendChild(btn);
+    });
+  }
   showCard('result-card', true);
 }
 
@@ -234,14 +266,18 @@ function copyResult() {
   navigator.clipboard.writeText(document.getElementById('result-text').value);
 }
 
-function downloadResult() {
-  const text = document.getElementById('result-text').value;
+function downloadText(text, name) {
   const ext = currentFormat === 'srt' ? 'srt' : 'txt';
+  const safeName = name.replace(/[<>:"/\\|?*]/g, '').trim().replace(/\s+/g, '_').slice(0, 80) || 'transcription';
   const a = Object.assign(document.createElement('a'), {
     href: URL.createObjectURL(new Blob([text], { type: 'text/plain' })),
-    download: `transcription.${ext}`,
+    download: `${safeName}.${ext}`,
   });
   a.click();
+}
+
+function downloadResult() {
+  downloadText(document.getElementById('result-text').value, currentTitle);
 }
 </script>
 </body>

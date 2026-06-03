@@ -39,12 +39,12 @@ def transcribe(
     model_size: str = 'base',
     output_format: str = 'txt',
     language: Optional[str] = None,
-    progress_callback: Optional[Callable[[str], None]] = None,
+    progress_callback: Optional[Callable] = None,
     metadata_callback: Optional[Callable[[dict], None]] = None,
 ) -> str:
-    def progress(msg: str):
+    def progress(msg: str, pct: Optional[int] = None):
         if progress_callback:
-            progress_callback(msg)
+            progress_callback(msg, pct)
 
     model = _get_model(model_size)
 
@@ -62,16 +62,21 @@ def transcribe(
                 progress('extracting audio')
                 audio_path = _extract_audio(source, tmp)
 
-        progress('transcribing')
-        segments, _info = model.transcribe(
+        progress('transcribing', 0)
+        segments_gen, info = model.transcribe(
             audio_path,
             language=language,
             beam_size=5,
             vad_filter=True,
         )
-        segments = list(segments)
+        total_duration = info.duration or 1.0
+        segments = []
+        for seg in segments_gen:
+            segments.append(seg)
+            pct = min(int(seg.end / total_duration * 100), 99)
+            progress('transcribing', pct)
 
-        progress('done')
+        progress('done', 100)
 
         if output_format == 'srt':
             return format_srt(segments)

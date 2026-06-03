@@ -40,7 +40,7 @@ async def start_transcription(
     language: Optional[str] = Form(None),
 ):
     job_id = str(uuid.uuid4())
-    jobs[job_id] = {"status": "queued", "status_text": "Queued", "result": None, "error": None}
+    jobs[job_id] = {"status": "queued", "status_text": "Queued", "result": None, "title": "", "error": None}
 
     lang = language or None
 
@@ -80,37 +80,51 @@ async def get_status(job_id: str):
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
-def _set_progress(job_id: str, text: str):
+def _set_progress(job_id: str, text: str, pct: int = None):
     if job_id in jobs:
         jobs[job_id]["status"] = "running"
         jobs[job_id]["status_text"] = text.capitalize()
+        if pct is not None:
+            jobs[job_id]["progress"] = pct
 
 
 def _run_url_job(job_id, url, model, output_format, language):
+    captured_meta = {}
     try:
         result = transcribe(
             url, model_size=model, output_format=output_format, language=language,
-            progress_callback=lambda msg: _set_progress(job_id, msg),
+            progress_callback=lambda msg, pct=None: _set_progress(job_id, msg, pct),
+            metadata_callback=lambda meta: captured_meta.update(meta),
         )
-        jobs[job_id] = {"status": "done", "status_text": "Done", "result": result, "error": None}
+        jobs[job_id] = {"status": "done", "status_text": "Done", "result": result, "results": None, "title": captured_meta.get('title', ''), "progress": 100, "error": None}
     except Exception as e:
-        jobs[job_id] = {"status": "error", "status_text": "Error", "result": None, "error": str(e)}
+        jobs[job_id] = {"status": "error", "status_text": "Error", "result": None, "results": None, "title": "", "progress": 0, "error": str(e)}
 
 
 def _run_file_job(job_id, paths, model, output_format, language, tmp_dir):
     try:
-        results = []
+        per_file = []
         for i, path in enumerate(paths):
-            def cb(msg, idx=i): _set_progress(job_id, f"File {idx+1}/{len(paths)}: {msg}")
+            def cb(msg, pct=None, idx=i): _set_progress(job_id, f"File {idx+1}/{len(paths)}: {msg}", pct)
             result = transcribe(
                 path, model_size=model, output_format=output_format, language=language,
                 progress_callback=cb,
             )
-            name = Path(path).stem
-            results.append(f"=== {name} ===\n{result}" if len(paths) > 1 else result)
-        jobs[job_id] = {"status": "done", "status_text": "Done", "result": "\n\n".join(results), "error": None}
+            per_file.append({"name": Path(path).stem, "text": result})
+
+        combined = "\n\n".join(
+            f"=== {r['name']} ===\n{r['text']}" if len(per_file) > 1 else r['text']
+            for r in per_file
+        )
+        title = per_file[0]["name"] if len(per_file) == 1 else ''
+        jobs[job_id] = {
+            "status": "done", "status_text": "Done",
+            "result": combined,
+            "results": per_file if len(per_file) > 1 else None,
+            "title": title, "progress": 100, "error": None,
+        }
     except Exception as e:
-        jobs[job_id] = {"status": "error", "status_text": "Error", "result": None, "error": str(e)}
+        jobs[job_id] = {"status": "error", "status_text": "Error", "result": None, "results": None, "title": "", "progress": 0, "error": str(e)}
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
